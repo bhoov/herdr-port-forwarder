@@ -168,6 +168,16 @@ def write_json(path: str, value) -> None:
     os.replace(tmp, path)
 
 
+def write_text(path: str, text: str) -> None:
+    directory = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp-")
+    with os.fdopen(fd, "w", encoding="utf-8") as file:
+        file.write(text)
+    if os.path.exists(path):
+        os.chmod(tmp, os.stat(path).st_mode & 0o777)
+    os.replace(tmp, path)
+
+
 def load_config() -> dict:
     config = dict(DEFAULT_CONFIG)
     loaded = load_json(CONFIG_PATH, {})
@@ -805,7 +815,9 @@ def open_popup() -> int:
 # ---------------------------------------------------------------------------------------------
 # Config setup
 
-POPUP_KEY = "prefix+shift+p"
+# prefix+shift+p, the key of version 0.1.3, is Herdr's default for rename_pane.
+POPUP_KEY = "prefix+shift+f"
+_OLD_POPUP_BINDING = re.compile(r'key = "prefix\+shift\+p"(\s*\ntype = "plugin_action"\s*\ncommand = "bhoov\.port-forwarder\.show")')
 SIDEBAR_BLOCK = """
 [ui.sidebar.spaces]
 rows = [
@@ -853,7 +865,7 @@ def defines_space_rows(text: str) -> bool:
 
 
 def plan_config(text: str) -> Tuple[str, List[str]]:
-    """Return the text to append to the Herdr config and one message for each item."""
+    """Return the new Herdr config text and one message for each item."""
     addition = ""
     messages = []
     if "$ports" in text:
@@ -863,14 +875,19 @@ def plan_config(text: str) -> Tuple[str, List[str]]:
     else:
         addition += SIDEBAR_BLOCK
         messages.append("Sidebar: added a Space row layout with $ports at the end of the branch line.")
-    if f"{PLUGIN_ID}.show" in text:
+    if _OLD_POPUP_BINDING.search(text) and not re.search(rf"[\"']{re.escape(POPUP_KEY)}[\"']", text):
+        text = _OLD_POPUP_BINDING.sub(f'key = "{POPUP_KEY}"\\1', text, count=1)
+        messages.append(f"Key: moved the popup from prefix+shift+p, Herdr's rename-pane key, to {POPUP_KEY}.")
+    elif f"{PLUGIN_ID}.show" in text:
         messages.append("Key: the popup already has a key.")
     elif re.search(rf"[\"']{re.escape(POPUP_KEY)}[\"']", text):
         messages.append(f"Key: not changed, because {POPUP_KEY} is already bound. Bind {PLUGIN_ID}.show to another key.")
     else:
         addition += KEY_BLOCK
         messages.append(f"Key: {POPUP_KEY} opens the popup.")
-    return addition, messages
+    if addition:
+        text += ("" if not text or text.endswith("\n") else "\n") + addition
+    return text, messages
 
 
 def setup_config() -> int:
@@ -880,14 +897,13 @@ def setup_config() -> int:
             text = file.read()
     except FileNotFoundError:
         text = ""
-    addition, messages = plan_config(text)
-    if addition:
+    new_text, messages = plan_config(text)
+    if new_text != text:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         if text:
             with open(path + ".bak-port-forwarder", "w", encoding="utf-8") as file:
                 file.write(text)
-        with open(path, "a", encoding="utf-8") as file:
-            file.write(("" if not text or text.endswith("\n") else "\n") + addition)
+        write_text(path, new_text)
         reload = subprocess.run([HERDR, "server", "reload-config"], stdin=subprocess.DEVNULL, capture_output=True, text=True)
         try:
             diagnostics = json.loads(reload.stdout)["result"].get("diagnostics") or []

@@ -18,7 +18,7 @@ herdr plugin install bhoov/herdr-port-forwarder
 herdr plugin action invoke bhoov.port-forwarder.setup
 ```
 
-`setup` adds the ports to the Workspace sidebar, binds `prefix+shift+p` to the popup in your
+`setup` adds the ports to the Workspace sidebar, binds `prefix+shift+f` to the popup in your
 Herdr `config.toml`, reloads the config, and starts the plugin. After this, the plugin starts
 on its own with the Herdr server.
 
@@ -29,7 +29,7 @@ To update, run both commands again.
 - **Sidebar.** `⇄ 5173 8000→8001` means that remote port 5173 is at `http://localhost:5173/`
   and remote port 8000 is at `http://localhost:8001/`, because a local program already used
   8000. Workspaces without forwards look as before.
-- **Popup.** `prefix+shift+p` lists every forward in the sidebar notation, for example
+- **Popup.** `prefix+shift+f`, with a Local workspace focused, lists every forward in the sidebar notation, for example
   `localhost:8001 ⇄ workbox:8000`. A yellow local port differs from the remote port. Click a
   row to open it in the browser. Press `q` or Esc to close the popup.
 - **Toasts.** A toast shows when a forward opens (`Forwarded :5173 ← workbox`) and when a
@@ -50,8 +50,11 @@ To update, run both commands again.
 - The sidebar row in the setup adds the token at the end of the branch line. A row that is too
   wide is cut at the end, so the ports are cut before the branch. Drag the sidebar edge to widen
   it, or open the popup. Clicking the row selects the workspace; it does not open the browser.
-- `prefix+p` is Herdr's default key for the previous tab, so the setup uses `prefix+shift+p`. A
-  plugin cannot declare its own keybinding.
+- `prefix+shift+f` is not used by any Herdr default key. A plugin cannot declare its own
+  keybinding, so `setup` adds it to your config.
+- The popup key works while a Local workspace is focused. Herdr runs a custom key on the server
+  of the focused workspace, and the plugin runs only on this computer, so the key does nothing
+  while a workspace on a saved machine is focused. The sidebar shows the ports in both cases.
 
 ### Sidebar row and key
 
@@ -66,7 +69,7 @@ rows = [
 ]
 
 [[keys.command]]
-key = "prefix+shift+p"
+key = "prefix+shift+f"
 type = "plugin_action"
 command = "bhoov.port-forwarder.show"
 description = "forwarded ports"

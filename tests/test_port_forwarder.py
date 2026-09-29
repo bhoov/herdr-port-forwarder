@@ -67,14 +67,23 @@ class SplitSections(unittest.TestCase):
 
 class PlanConfig(unittest.TestCase):
     def test_empty_config_gets_both_blocks(self):
-        addition, _ = pf.plan_config("")
-        self.assertIn("[ui.sidebar.spaces]", addition)
-        self.assertIn(pf.POPUP_KEY, addition)
+        text, _ = pf.plan_config("")
+        self.assertIn("[ui.sidebar.spaces]", text)
+        self.assertIn(pf.POPUP_KEY, text)
 
-    def test_second_run_adds_nothing(self):
-        addition, _ = pf.plan_config("")
-        again, _ = pf.plan_config("onboarding = false\n" + addition)
-        self.assertEqual(again, "")
+    def test_second_run_changes_nothing(self):
+        once, _ = pf.plan_config("onboarding = false\n")
+        twice, _ = pf.plan_config(once)
+        self.assertEqual(twice, once)
+
+    def test_the_old_rename_pane_key_moves_to_the_new_key(self):
+        old = pf.KEY_BLOCK.replace(pf.POPUP_KEY, "prefix+shift+p")
+        text, messages = pf.plan_config("[ui]\nx = 1\n" + old + '[[keys.command]]\nkey = "prefix+t"\ntype = "pane"\ncommand = "htop"\n')
+        self.assertIn(f'key = "{pf.POPUP_KEY}"', text)
+        self.assertNotIn("prefix+shift+p", text)
+        self.assertIn('key = "prefix+t"', text)
+        self.assertEqual(text.count("[[keys.command]]"), 2)
+        self.assertIn("moved", messages[1])
 
     def test_existing_space_rows_are_not_touched(self):
         for text in [
@@ -85,17 +94,18 @@ class PlanConfig(unittest.TestCase):
             "[ui]\nsidebar.spaces.rows = [[\"workspace\"]]\n",
             "ui.sidebar.spaces.rows = [[\"workspace\"]]\n",
         ]:
-            addition, messages = pf.plan_config(text)
-            self.assertNotIn("[ui.sidebar.spaces]", addition, text)
+            new_text, messages = pf.plan_config(text)
+            self.assertEqual(new_text.count("[ui.sidebar.spaces]"), text.count("[ui.sidebar.spaces]"), text)
             self.assertIn("not changed", messages[0], text)
 
     def test_other_sidebar_settings_do_not_block_the_row(self):
-        addition, _ = pf.plan_config("[ui.sidebar.agents]\nrow_gap = 0\n[ui]\nmouse_scroll_lines = 1\n")
-        self.assertIn("[ui.sidebar.spaces]", addition)
+        text, _ = pf.plan_config("[ui.sidebar.agents]\nrow_gap = 0\n[ui]\nmouse_scroll_lines = 1\n")
+        self.assertIn("[ui.sidebar.spaces]", text)
 
     def test_a_key_already_in_use_is_not_bound_again(self):
-        addition, messages = pf.plan_config('[[keys.command]]\nkey = "prefix+shift+p"\ntype = "pane"\ncommand = "htop"\n')
-        self.assertNotIn("[[keys.command]]", addition)
+        config = '[[keys.command]]\nkey = "prefix+shift+f"\ntype = "pane"\ncommand = "htop"\n'
+        text, messages = pf.plan_config(config)
+        self.assertEqual(text.count("[[keys.command]]"), 1)
         self.assertIn("already bound", messages[1])
 
 
