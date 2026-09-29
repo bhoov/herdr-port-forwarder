@@ -138,6 +138,10 @@ def local_port_is_free(port: int) -> bool:
     for family, address in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
         try:
             with socket.socket(family, socket.SOCK_STREAM) as sock:
+                # ssh sets SO_REUSEADDR on its listeners, so closed connections in TIME_WAIT
+                # do not stop it from binding. Without the option this check would report
+                # a recently used port as busy.
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind((address, port))
         except OSError as error:
             if family == socket.AF_INET6 and error.errno in (errno.EADDRNOTAVAIL, errno.EAFNOSUPPORT):
