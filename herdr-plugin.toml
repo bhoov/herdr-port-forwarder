@@ -1,0 +1,38 @@
+id = "bhoov.port-forwarder"
+name = "Port Forwarder"
+version = "0.1.0"
+min_herdr_version = "0.9.1"
+description = "Forward loopback ports that panes on saved SSH machines print, such as localhost:5173, to this computer."
+# The daemon needs a POSIX `ssh` with connection multiplexing (-M, -S, -O forward).
+platforms = ["linux", "macos"]
+
+# A one-shot launch: `start` puts the daemon in the background and exits. It does
+# nothing when a daemon for this user already runs, for example after a live handoff.
+[[startup]]
+command = ["python3", "port_forwarder.py", "start"]
+
+[[actions]]
+id = "show"
+title = "Port forwards: show"
+contexts = ["global"]
+command = ["python3", "port_forwarder.py", "open-popup"]
+
+[[actions]]
+id = "restart"
+title = "Port forwards: restart"
+contexts = ["global"]
+command = ["python3", "port_forwarder.py", "restart"]
+
+[[actions]]
+id = "stop"
+title = "Port forwards: stop"
+contexts = ["global"]
+command = ["python3", "port_forwarder.py", "stop"]
+
+[[panes]]
+id = "ports"
+title = "Forwarded ports"
+placement = "popup"
+width = 72
+height = 16
+command = ["python3", "port_forwarder.py", "show"]
