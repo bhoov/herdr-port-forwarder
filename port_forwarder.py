@@ -716,32 +716,54 @@ def stop_daemon() -> int:
 # Popup
 
 
-def render_status() -> str:
-    status = load_json(STATUS_PATH, {})
-    running = acquire_lock_probe()
+BLUE = "\x1b[38;2;137;180;250m"
+YELLOW = "\x1b[38;2;229;192;123m"
+DIM = "\x1b[2m"
+RESET = "\x1b[0m"
+_MOUSE_PRESS = re.compile(rb"\x1b\[<(\d+);(\d+);(\d+)M")
+
+
+def render_popup(color: bool) -> Tuple[List[str], Dict[int, str]]:
+    """Return the popup lines and the URL that each clickable line index opens."""
+    def paint(text: str, style: str) -> str:
+        return f"{style}{text}{RESET}" if color else text
+
     lines = [" Forwarded ports", ""]
-    if not running:
+    urls: Dict[int, str] = {}
+    if not acquire_lock_probe():
         lines.append("  The port forwarder does not run.")
         lines.append("  Run the action 'Port forwards: restart' to start it.")
-        return "\n".join(lines)
+        return lines, urls
+    status = load_json(STATUS_PATH, {})
     machines = sorted((status.get("machines") or {}).values(), key=lambda item: item.get("label", ""))
-    rows = 0
     for machine in machines:
         for forward in machine.get("forwards", []):
             remote, local = forward["remote_port"], forward["local_port"]
-            source = f"{machine['label']}:{remote}"
-            note = "  (local port differs)" if remote != local else ""
-            workspace = f"  [{forward['workspace']}]" if forward.get("workspace") else ""
-            lines.append(f"  http://localhost:{local}/".ljust(30) + f"← {source}{workspace}{note}")
-            rows += 1
+            # The same notation as the sidebar token; a yellow local port means it differs from the remote one.
+            local_text = f"localhost:{local}".ljust(16)
+            workspace = f"  {paint(forward['workspace'], DIM)}" if forward.get("workspace") else ""
+            urls[len(lines)] = f"http://localhost:{local}/"
+            lines.append(f"  {paint(local_text, YELLOW) if remote != local else local_text} {paint('⇄', BLUE)} {machine['label']}:{remote}{workspace}")
         if machine.get("error"):
             lines.append(f"  ! {machine['label']}: {machine['error']}")
-    if rows == 0:
+    if not urls:
         lines.append("  No ports are forwarded.")
         if not machines:
             lines.append("  No saved machine is enabled.")
-    lines += ["", "  Click a URL to open it. Press q or Esc to close."]
-    return "\n".join(lines)
+    lines += ["", paint("  Click a row to open it in the browser. q or Esc closes.", DIM)]
+    return lines, urls
+
+
+def render_status() -> str:
+    return "\n".join(render_popup(color=False)[0])
+
+
+def open_url(url: str) -> None:
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    try:
+        subprocess.Popen([opener, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as error:
+        log(f"cannot open {url}: {error}")
 
 
 def show_popup() -> int:
@@ -752,17 +774,26 @@ def show_popup() -> int:
     saved = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
-        sys.stdout.write("\x1b[?25l")
+        # Herdr passes every mouse event in a popup to its program, so the popup handles
+        # clicks itself: hide the cursor and turn on button reporting in SGR format.
+        sys.stdout.write("\x1b[?25l\x1b[?1000h\x1b[?1006h")
         while True:
-            sys.stdout.write("\x1b[H\x1b[2J" + render_status().replace("\n", "\r\n"))
+            lines, urls = render_popup(color=True)
+            sys.stdout.write("\x1b[H\x1b[2J" + "\r\n".join(lines))
             sys.stdout.flush()
             ready, _, _ = select.select([sys.stdin], [], [], 1.0)
-            if ready:
-                key = os.read(fd, 16)
-                if key[:1] in (b"q", b"Q", b"\x1b", b"\x03"):
-                    return 0
+            if not ready:
+                continue
+            data = os.read(fd, 256)
+            presses = _MOUSE_PRESS.findall(data)
+            if not presses and data[:1] in (b"q", b"Q", b"\x1b", b"\x03"):
+                return 0
+            for button, _column, row in presses:
+                url = urls.get(int(row) - 1)
+                if int(button) == 0 and url:
+                    open_url(url)
     finally:
-        sys.stdout.write("\x1b[?25h")
+        sys.stdout.write("\x1b[?1006l\x1b[?1000l\x1b[?25h")
         sys.stdout.flush()
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 

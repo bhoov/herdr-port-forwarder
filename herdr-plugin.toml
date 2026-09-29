@@ -1,6 +1,6 @@
 id = "bhoov.port-forwarder"
 name = "Port Forwarder"
-version = "0.1.3"
+version = "0.1.4"
 min_herdr_version = "0.9.1"
 description = "Forward loopback ports that panes on saved SSH machines print, such as localhost:5173, to this computer."
 # The daemon needs a POSIX `ssh` with connection multiplexing (-M, -S, -O forward).

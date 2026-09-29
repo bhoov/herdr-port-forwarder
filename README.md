@@ -11,9 +11,7 @@ the plugin; it reaches them over SSH.
 
 ## Setup
 
-Requirements on this computer: Herdr 0.9.1 or later, `python3` 3.8 or later (standard library
-only) and OpenSSH, on Linux or macOS. Each remote machine needs Herdr and an SSH server that
-allows TCP forwarding.
+Requirements on this computer: Herdr 0.9.1 or later, python 3.8 or later, and OpenSSH. Linux or macOS only. Each remote machine needs Herdr and an SSH server that allows TCP forwarding.
 
 ```bash
 herdr plugin install bhoov/herdr-port-forwarder
@@ -21,10 +19,7 @@ herdr plugin action invoke bhoov.port-forwarder.setup
 ```
 
 `setup` adds a Space sidebar row with the ports and binds `prefix+shift+p` to the popup in your
-Herdr `config.toml`, reloads the config, and starts the plugin. It is safe to run again: it
-adds only what is missing. If your config already has its own `[ui.sidebar.spaces]` layout or
-another binding for `prefix+shift+p`, it leaves that alone and says so in a toast; see
-[Sidebar row and key](#sidebar-row-and-key) to add them by hand. After this, the plugin starts
+Herdr `config.toml`, reloads the config, and starts the plugin. After this, the plugin starts
 on its own with the Herdr server.
 
 To update, run both commands again.
@@ -34,8 +29,9 @@ To update, run both commands again.
 - **Sidebar.** `⇄ 5173 8000→8001` means that remote port 5173 is at `http://localhost:5173/`
   and remote port 8000 is at `http://localhost:8001/`, because a local program already used
   8000. Workspaces without forwards look as before.
-- **Popup.** `prefix+shift+p` lists every forward with its full URL. Click a URL to open it.
-  Press `q` or Esc to close the popup.
+- **Popup.** `prefix+shift+p` lists every forward in the sidebar notation, for example
+  `localhost:8001 ⇄ workbox:8000`. A yellow local port differs from the remote port. Click a
+  row to open it in the browser. Press `q` or Esc to close the popup.
 - **Toasts.** A toast shows when a forward opens (`Forwarded :5173 ← workbox`) and when a
   forward or a machine's connection fails.
 
