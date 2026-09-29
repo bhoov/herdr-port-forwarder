@@ -114,8 +114,10 @@ connection. The commands that use the connection run with `-F /dev/null` for the
 Every scan runs over that connection:
 
 1. It runs the remote `herdr workspace list`, `herdr pane list` and, for each pane,
-   `herdr pane read --source recent-unwrapped --lines 200`, and finds loopback addresses in the
-   output.
+   `herdr pane read --source visible`, and finds loopback addresses in the output. It reads the
+   last 200 lines of scrollback (`--source recent-unwrapped`) only the first time it sees a pane,
+   because with Herdr 0.9.1 a scrollback read makes the remote panes stutter. After that, an
+   address must be on screen during a scan.
 2. It probes each announced port with `ssh -W localhost:<port>`. A refused channel means the port
    does not accept connections.
 3. It adds forwards with `ssh -O forward -L localhost:<local>:localhost:<remote>` and removes them

@@ -2,7 +2,8 @@
 """Forward loopback ports that panes on saved Herdr machines print to this computer.
 
 For each enabled saved machine, the daemon keeps one multiplexed SSH connection. Every few
-seconds it reads the recent output of each remote pane and finds loopback addresses such as
+seconds it reads the visible screen of each remote pane (the scrollback too, the first time it
+sees the pane) and finds loopback addresses such as
 `http://localhost:5173/`. It probes each announced port through the connection. When the port
 accepts connections, it adds a local forward (`ssh -O forward -L`) on the same local port, or
 on a nearby one when a local program already uses it. It closes the forward when the port stops
@@ -37,7 +38,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 PLUGIN_ID = "bhoov.port-forwarder"
 TOKEN_NAME = "ports"
@@ -50,9 +51,11 @@ MIN_PORT = 1024
 NEARBY_PORTS = 20
 # At most this many announced ports are probed per machine.
 MAX_CANDIDATES = 32
-READ_LINES = 200
 PROBE_OPEN_AFTER = 2.0
 MACHINE_REFRESH_SECONDS = 30
+# Lines of scrollback read once per pane. Later scans read only the visible screen, because a
+# scrollback read makes the remote panes stutter.
+HISTORY_LINES = 200
 RECONNECT_SECONDS = 30
 CONNECT_TIMEOUT_SECONDS = 30
 # A port whose forward failed is tried again after this delay.
@@ -75,6 +78,9 @@ DEFAULT_CONFIG = {
     "notify": True,  # show a toast when a forward opens or fails
     "machines": None,  # labels or ids to forward from; null means every enabled machine
 }
+
+# The pane ids that the scan script reads; other ids cannot appear in its shell `case`.
+PANE_ID = re.compile(r"[A-Za-z0-9:_.-]+")
 
 _LOOPBACK = re.compile(
     r"(?:(?<![A-Za-z0-9._-])(?:localhost|127\.0\.0\.1|0\.0\.0\.0)|\[::1?\]):(\d{1,5})(?![A-Za-z0-9])",
@@ -288,6 +294,7 @@ class MachineWorker(threading.Thread):
         self.error: Optional[str] = None
         self.notified_error: Optional[str] = None
         self.failed_forwards: Dict[int, float] = {}  # remote port → monotonic time of the next attempt
+        self.history_read: Set[str] = set()  # panes whose scrollback a scan already read
 
     # -- ssh -------------------------------------------------------------------------------
 
@@ -385,13 +392,17 @@ class MachineWorker(threading.Thread):
 
     def scan(self, token_refresh: str) -> Optional[ScanResult]:
         nonce = secrets.token_hex(6)
+        known = " ".join(sorted(self.history_read))
         body = token_refresh + f"""
 printf '@@{nonce} workspaces\\n'; "$H" workspace list
 L=$("$H" pane list) || exit $?
 printf '\\n@@{nonce} panes\\n%s\\n' "$L"
 for p in $(printf '%s' "$L" | tr ',{{' '\\n\\n' | sed -n 's/^"pane_id":"\\([A-Za-z0-9:_.-]*\\)"$/\\1/p'); do
     printf '\\n@@{nonce} read %s\\n' "$p"
-    "$H" pane read "$p" --source recent-unwrapped --lines {READ_LINES} 2>/dev/null
+    case " {known} " in
+        *" $p "*) "$H" pane read "$p" --source visible 2>/dev/null ;;
+        *) "$H" pane read "$p" --source recent-unwrapped --lines {HISTORY_LINES} 2>/dev/null ;;
+    esac
 done
 """
         try:
@@ -413,6 +424,7 @@ done
             self.set_error(f"unexpected herdr output: {error}")
             return None
         pane_workspace = {pane["pane_id"]: pane.get("workspace_id") for pane in panes}
+        self.history_read = {pane_id for pane_id in pane_workspace if PANE_ID.fullmatch(pane_id)}
         for name, text in sections.items():
             if not name.startswith("read "):
                 continue
@@ -559,6 +571,7 @@ done
             if self.master is None or self.master.poll() is not None:
                 self.forwards.clear()  # a dead master closed its listeners
                 self.reported.clear()
+                self.history_read.clear()
                 if not self.connect():
                     self.publish_status()
                     self.stop_event.wait(RECONNECT_SECONDS)
