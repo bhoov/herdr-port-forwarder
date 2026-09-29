@@ -18,16 +18,19 @@ reach the remote development server.
 
 **Space sidebar rows.** The plugin sets a `$ports` token on the remote workspace whose pane
 printed the address. Add a row with that token to your layout in `~/.config/herdr/config.toml`
-(these are the default rows plus the new one):
+(these are the default rows with the token added at the end of the branch line):
 
 ```toml
 [ui.sidebar.spaces]
 rows = [
   ["state_icon", "workspace"],
-  ["branch", "git_status"],
-  [{ token = "$ports", fg = "#89b4fa" }],
+  ["branch", "git_status", { token = "$ports", fg = "#89b4fa" }],
 ]
 ```
+
+A token with no value disappears together with its ` · ` separator, so workspaces without
+forwards look as before. A row that is too wide is cut at the end, so the ports are cut before
+the branch; drag the sidebar edge to widen it, or open the popup.
 
 The row reads, for example, `⇄ 5173 8000→8001`: remote port 5173 uses local port 5173, and
 remote port 8000 uses local port 8001 because 8000 was in use on this computer. The row
@@ -38,11 +41,12 @@ not open the browser.
 connection fails.
 
 **Popup.** The action `bhoov.port-forwarder.show` opens a popup that lists each forward with its
-full URL. Click a URL to open it. Bind the action to a key:
+full URL. Click a URL to open it. A plugin cannot declare its own keybinding, so bind the action
+in your config. `prefix+shift+p` is free in Herdr's default keys (`prefix+p` is the previous tab):
 
 ```toml
 [[keys.command]]
-key = "prefix+p"
+key = "prefix+shift+p"
 type = "plugin_action"
 command = "bhoov.port-forwarder.show"
 description = "forwarded ports"
