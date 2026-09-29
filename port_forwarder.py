@@ -54,6 +54,8 @@ PROBE_OPEN_AFTER = 2.0
 MACHINE_REFRESH_SECONDS = 30
 RECONNECT_SECONDS = 30
 CONNECT_TIMEOUT_SECONDS = 30
+# A port whose forward failed is tried again after this delay.
+FORWARD_RETRY_SECONDS = 60
 
 HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
 STATE_DIR = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.expanduser("~/.local/state/herdr-port-forwarder")
@@ -270,11 +272,19 @@ class MachineWorker(threading.Thread):
         self.reported: Dict[str, str] = {}  # workspace id → token value reported to the remote server
         self.error: Optional[str] = None
         self.notified_error: Optional[str] = None
+        self.failed_forwards: Dict[int, float] = {}  # remote port → monotonic time of the next attempt
 
     # -- ssh -------------------------------------------------------------------------------
 
     def ssh(self, *options: str, command: Tuple[str, ...] = ()) -> List[str]:
-        return ["ssh", "-S", self.control_path, "-o", "ControlMaster=no", "-o", "BatchMode=yes", *options, self.machine.target, *command]
+        """A command that runs through the master connection.
+
+        `-F /dev/null` keeps the user's ssh config out of these commands. Otherwise
+        `-O forward` also sends the host's `LocalForward` lines, and the master reports the
+        whole request as failed when one of those ports is in use. `ClearAllForwardings`
+        cannot be used here because it also removes the `-L` of the request.
+        """
+        return ["ssh", "-F", "/dev/null", "-S", self.control_path, "-o", "ControlMaster=no", "-o", "BatchMode=yes", *options, self.machine.target, *command]
 
     def master_alive(self) -> bool:
         result = subprocess.run(self.ssh("-O", "check"), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -427,12 +437,21 @@ done
             log(f"{self.machine.label}: no free local port near {remote_port}")
             return
         result = subprocess.run(self.ssh("-O", "forward", "-L", self.forward_spec(local_port, remote_port)), stdin=subprocess.DEVNULL, capture_output=True, text=True)
-        if result.returncode != 0:
-            message = result.stderr.strip() or f"exit {result.returncode}"
+        if result.returncode != 0 or local_port_is_free(local_port):
+            if result.returncode == 0:
+                message = "ssh did not open the local listener"
+            else:
+                lines = result.stderr.strip().splitlines()
+                message = lines[-1] if lines else f"exit {result.returncode}"
+            # Cancel in case the master opened the listener but reported a failure.
+            subprocess.run(self.ssh("-O", "cancel", "-L", self.forward_spec(local_port, remote_port)), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            first_failure = remote_port not in self.failed_forwards
+            self.failed_forwards[remote_port] = time.monotonic() + FORWARD_RETRY_SECONDS
             log(f"{self.machine.label}: forward {remote_port} failed: {message}")
-            if self.config["notify"]:
+            if self.config["notify"] and first_failure:
                 notify(f"Port forward failed: {self.machine.label}:{remote_port}", message)
             return
+        self.failed_forwards.pop(remote_port, None)
         self.forwards[remote_port] = Forward(local_port, workspace_id)
         self.registry.set(self.machine.id, remote_port, local_port)
         source = self.machine.label if local_port == remote_port else f"{self.machine.label}:{remote_port}"
@@ -493,7 +512,8 @@ done
             self.last_seen[port] = workspace_id
         while len(self.last_seen) > MAX_CANDIDATES:
             self.last_seen.pop(next(iter(self.last_seen)))
-        candidates = [port for port in self.last_seen if port not in self.forwards]
+        now = time.monotonic()
+        candidates = [port for port in self.last_seen if port not in self.forwards and self.failed_forwards.get(port, 0) <= now]
         probed = self.probe(candidates + list(self.forwards))
         for remote_port, forward in list(self.forwards.items()):
             if remote_port in scan.ports:
@@ -508,6 +528,7 @@ done
             elif port not in scan.ports:
                 # Closed and no longer on screen: stop probing it.
                 self.last_seen.pop(port, None)
+                self.failed_forwards.pop(port, None)
         desired = self.desired_tokens()
         commands = self.token_commands(desired, refresh=False)
         if commands.strip() and self.remote_script(commands).returncode == 0:
