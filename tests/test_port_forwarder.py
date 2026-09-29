@@ -65,5 +65,39 @@ class SplitSections(unittest.TestCase):
         )
 
 
+class PlanConfig(unittest.TestCase):
+    def test_empty_config_gets_both_blocks(self):
+        addition, _ = pf.plan_config("")
+        self.assertIn("[ui.sidebar.spaces]", addition)
+        self.assertIn(pf.POPUP_KEY, addition)
+
+    def test_second_run_adds_nothing(self):
+        addition, _ = pf.plan_config("")
+        again, _ = pf.plan_config("onboarding = false\n" + addition)
+        self.assertEqual(again, "")
+
+    def test_existing_space_rows_are_not_touched(self):
+        for text in [
+            "[ui.sidebar.spaces]\nrows = [[\"workspace\"]]\n",
+            "[ ui.sidebar.spaces ]\nrow_gap = 1\n",
+            "[ui.sidebar]\nspaces = { rows = [[\"workspace\"]] }\n",
+            "[ui.sidebar]\nspaces.rows = [[\"workspace\"]]\n",
+            "[ui]\nsidebar.spaces.rows = [[\"workspace\"]]\n",
+            "ui.sidebar.spaces.rows = [[\"workspace\"]]\n",
+        ]:
+            addition, messages = pf.plan_config(text)
+            self.assertNotIn("[ui.sidebar.spaces]", addition, text)
+            self.assertIn("not changed", messages[0], text)
+
+    def test_other_sidebar_settings_do_not_block_the_row(self):
+        addition, _ = pf.plan_config("[ui.sidebar.agents]\nrow_gap = 0\n[ui]\nmouse_scroll_lines = 1\n")
+        self.assertIn("[ui.sidebar.spaces]", addition)
+
+    def test_a_key_already_in_use_is_not_bound_again(self):
+        addition, messages = pf.plan_config('[[keys.command]]\nkey = "prefix+shift+p"\ntype = "pane"\ncommand = "htop"\n')
+        self.assertNotIn("[[keys.command]]", addition)
+        self.assertIn("already bound", messages[1])
+
+
 if __name__ == "__main__":
     unittest.main()

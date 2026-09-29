@@ -16,6 +16,7 @@ Commands:
   restart     stop, then start
   show        list the forwards until q or Esc is pressed (the popup pane)
   open-popup  open the popup pane
+  setup       add the sidebar row and the popup key to the Herdr config if missing, then restart
 """
 
 from __future__ import annotations
@@ -770,6 +771,106 @@ def open_popup() -> int:
     return subprocess.run([HERDR, "plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "ports"]).returncode
 
 
+# ---------------------------------------------------------------------------------------------
+# Config setup
+
+POPUP_KEY = "prefix+shift+p"
+SIDEBAR_BLOCK = """
+[ui.sidebar.spaces]
+rows = [
+  ["state_icon", "workspace"],
+  ["branch", "git_status", { token = "$ports", fg = "#89b4fa" }],
+]
+"""
+KEY_BLOCK = f"""
+[[keys.command]]
+key = "{POPUP_KEY}"
+type = "plugin_action"
+command = "{PLUGIN_ID}.show"
+description = "forwarded ports"
+"""
+_TABLE_HEADER = re.compile(r"^\s*\[\[?\s*([^\]]+?)\s*\]\]?")
+_KEY_LINE = re.compile(r"^\s*([A-Za-z0-9_.\"'-]+?)\s*=")
+
+
+def herdr_config_path() -> str:
+    """The same lookup as Herdr: HERDR_CONFIG_PATH, then XDG_CONFIG_HOME, then ~/.config."""
+    if os.environ.get("HERDR_CONFIG_PATH"):
+        return os.environ["HERDR_CONFIG_PATH"]
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "herdr", "config.toml")
+
+
+def defines_space_rows(text: str) -> bool:
+    """Return whether the TOML text already configures `ui.sidebar.spaces` in any spelling."""
+    table = ""
+    for line in text.splitlines():
+        header = _TABLE_HEADER.match(line)
+        if header:
+            table = header.group(1).replace(" ", "").replace('"', "")
+            if table == "ui.sidebar.spaces" or table.startswith("ui.sidebar.spaces."):
+                return True
+            continue
+        key = _KEY_LINE.match(line)
+        if not key:
+            continue
+        path = f"{table}.{key.group(1)}" if table else key.group(1)
+        path = path.replace('"', "")
+        if path in ("ui", "ui.sidebar", "ui.sidebar.spaces") or path.startswith("ui.sidebar.spaces."):
+            return True
+    return False
+
+
+def plan_config(text: str) -> Tuple[str, List[str]]:
+    """Return the text to append to the Herdr config and one message for each item."""
+    addition = ""
+    messages = []
+    if "$ports" in text:
+        messages.append("Sidebar: $ports is already in the config.")
+    elif defines_space_rows(text):
+        messages.append('Sidebar: not changed, because the config already sets ui.sidebar.spaces. Add { token = "$ports" } to one of its rows.')
+    else:
+        addition += SIDEBAR_BLOCK
+        messages.append("Sidebar: added a Space row layout with $ports at the end of the branch line.")
+    if f"{PLUGIN_ID}.show" in text:
+        messages.append("Key: the popup already has a key.")
+    elif re.search(rf"[\"']{re.escape(POPUP_KEY)}[\"']", text):
+        messages.append(f"Key: not changed, because {POPUP_KEY} is already bound. Bind {PLUGIN_ID}.show to another key.")
+    else:
+        addition += KEY_BLOCK
+        messages.append(f"Key: {POPUP_KEY} opens the popup.")
+    return addition, messages
+
+
+def setup_config() -> int:
+    path = herdr_config_path()
+    try:
+        with open(path, encoding="utf-8") as file:
+            text = file.read()
+    except FileNotFoundError:
+        text = ""
+    addition, messages = plan_config(text)
+    if addition:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if text:
+            with open(path + ".bak-port-forwarder", "w", encoding="utf-8") as file:
+                file.write(text)
+        with open(path, "a", encoding="utf-8") as file:
+            file.write(("" if not text or text.endswith("\n") else "\n") + addition)
+        reload = subprocess.run([HERDR, "server", "reload-config"], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        try:
+            diagnostics = json.loads(reload.stdout)["result"].get("diagnostics") or []
+        except (ValueError, KeyError, TypeError):
+            diagnostics = [] if reload.returncode == 0 else [reload.stderr.strip() or "herdr server reload-config failed"]
+        if diagnostics:
+            messages.append("Config reload reported: " + "; ".join(str(item) for item in diagnostics))
+    messages.append(f"Config: {path}")
+    print("\n".join(messages))
+    start = stop_daemon() or start_daemon()
+    notify("Port forwarder set up", " ".join(messages[:-1]))
+    return start
+
+
 def main(argv: List[str]) -> int:
     commands = {
         "start": start_daemon,
@@ -779,6 +880,7 @@ def main(argv: List[str]) -> int:
         "show": show_popup,
         "open-popup": open_popup,
         "status": lambda: print(render_status()) or 0,
+        "setup": setup_config,
     }
     if len(argv) != 2 or argv[1] not in commands:
         print(__doc__, file=sys.stderr)

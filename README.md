@@ -16,30 +16,18 @@ only) and OpenSSH, on Linux or macOS. Each remote machine needs Herdr and an SSH
 allows TCP forwarding.
 
 ```bash
-# Install the plugin and start it. It starts on its own with the Herdr server after this.
 herdr plugin install bhoov/herdr-port-forwarder
-herdr plugin action invoke bhoov.port-forwarder.restart
-
-# Show the ports in the sidebar and open the list with prefix+shift+p.
-# If your config.toml already has a [ui.sidebar.spaces] table, add the $ports token to it instead.
-cat >> ~/.config/herdr/config.toml <<'EOF'
-
-[ui.sidebar.spaces]
-rows = [
-  ["state_icon", "workspace"],
-  ["branch", "git_status", { token = "$ports", fg = "#89b4fa" }],
-]
-
-[[keys.command]]
-key = "prefix+shift+p"
-type = "plugin_action"
-command = "bhoov.port-forwarder.show"
-description = "forwarded ports"
-EOF
-herdr server reload-config
+herdr plugin action invoke bhoov.port-forwarder.setup
 ```
 
-To update, run the first two commands again.
+`setup` adds a Space sidebar row with the ports and binds `prefix+shift+p` to the popup in your
+Herdr `config.toml`, reloads the config, and starts the plugin. It is safe to run again: it
+adds only what is missing. If your config already has its own `[ui.sidebar.spaces]` layout or
+another binding for `prefix+shift+p`, it leaves that alone and says so in a toast; see
+[Sidebar row and key](#sidebar-row-and-key) to add them by hand. After this, the plugin starts
+on its own with the Herdr server.
+
+To update, run both commands again.
 
 ## Using it
 
@@ -69,10 +57,33 @@ To update, run the first two commands again.
 - `prefix+p` is Herdr's default key for the previous tab, so the setup uses `prefix+shift+p`. A
   plugin cannot declare its own keybinding.
 
+### Sidebar row and key
+
+`setup` appends these to `config.toml`, keeping a copy of the previous file as
+`config.toml.bak-port-forwarder`:
+
+```toml
+[ui.sidebar.spaces]
+rows = [
+  ["state_icon", "workspace"],
+  ["branch", "git_status", { token = "$ports", fg = "#89b4fa" }],
+]
+
+[[keys.command]]
+key = "prefix+shift+p"
+type = "plugin_action"
+command = "bhoov.port-forwarder.show"
+description = "forwarded ports"
+```
+
+With your own Space layout, add `{ token = "$ports" }` to one of its rows. Then run
+`herdr server reload-config`.
+
 ### Actions
 
 | Action | Effect |
 | --- | --- |
+| `bhoov.port-forwarder.setup` | Add the sidebar row and the popup key to the config if they are missing, then restart the daemon. |
 | `bhoov.port-forwarder.show` | Open the popup. |
 | `bhoov.port-forwarder.restart` | Stop the daemon if it runs, then start it. Use it after changing the config. |
 | `bhoov.port-forwarder.stop` | Close all forwards, clear the tokens and stop the daemon. |
