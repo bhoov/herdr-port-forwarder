@@ -18,7 +18,7 @@ herdr plugin install bhoov/herdr-port-forwarder
 herdr plugin action invoke bhoov.port-forwarder.setup
 ```
 
-`setup` adds a Space sidebar row with the ports and binds `prefix+shift+p` to the popup in your
+`setup` adds the ports to the Workspace sidebar, binds `prefix+shift+p` to the popup in your
 Herdr `config.toml`, reloads the config, and starts the plugin. After this, the plugin starts
 on its own with the Herdr server.
 
